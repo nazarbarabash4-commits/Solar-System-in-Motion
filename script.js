@@ -2,38 +2,21 @@
   'use strict';
 
   // ======================================================================
-  // 0. NASA Open APIs (api.nasa.gov) — реальні живі дані поверх симуляції.
-  //    Ключ отримано на https://api.nasa.gov (безкоштовно, миттєво, без
-  //    підтвердження). Якщо захочеш власний ключ — заміни рядок нижче.
-  //    Mars Photos API наразі НЕ підключений: на боці NASA цей ендпоінт
-  //    зараз повертає 404 ("No such app") для всіх роверів — не проблема
-  //    в коді, перевірено напряму через curl.
+  // 0. NASA Open APIs (api.nasa.gov) — real live data overlaid on simulation.
+  //    Key obtained from https://api.nasa.gov (free, instant, no
+  //    verification). If you want your own key — replace the line below.
+  //    Mars Photos API is currently NOT connected: on NASA's side this endpoint
+  //    currently returns 404 ("No such app") for all rovers — not a problem
+  //    in the code, verified directly via curl.
   // ======================================================================
   const NASA_API_KEY = 'tYsAO3lfZHOUvxKa2uupckn9GW661t06A7YY5PuP';
 
-  // ---- Astronomy Picture of the Day — вантажиться одразу, ще до запуску ----
-  (function loadApod() {
-    fetch('https://api.nasa.gov/planetary/apod?api_key=' + NASA_API_KEY)
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (!data || data.media_type !== 'image' || !data.url) return; // деякі дні — відео
-        const strip = document.getElementById('apod-strip');
-        const thumb = document.getElementById('apod-thumb');
-        const title = document.getElementById('apod-title');
-        if (!strip || !thumb || !title) return;
-        thumb.src = data.url;
-        title.textContent = data.title;
-        strip.href = data.hdurl || data.url;
-        strip.style.display = 'flex';
-      })
-      .catch(function () { /* тихо ігноруємо — APOD не критичний для роботи симулятора */ });
-  })();
 
   // ======================================================================
-  // 1. Астрономічні дані (ті самі параметри й формули, що в Python-версії)
+  // 1. Astronomical data (same parameters and formulas as in Python version)
   // ======================================================================
-  const AU = 1.496e11;          // астрономічна одиниця, м
-  const SCENE_SCALE = 46;       // одиниць сцени на 1 а.о.
+  const AU = 1.496e11;          // astronomical unit, m
+  const SCENE_SCALE = 46;       // scene units per 1 AU
 
   const planetData = {
     Mercury: { a: 5.79e10,  e: 0.205, i: 7.0,  Om: 48.3,  w: 29.1,  T: 88,    L0: 252.25, color: 0xb5a396, size: 1.25,
@@ -65,7 +48,7 @@
       facts: { mass: '1.30 × 10²² kg', distance: '39.48 AU', day: '153.3 h — rotates backwards', year: '247.9 Earth years', moons: '5', temp: '−225 °C avg', blurb: 'Reclassified as a dwarf planet in 2006. Its large moon Charon is over half its size — they orbit a point between them.' } },
   };
 
-  // Карликові планети та відомі малі тіла (декоративний шар, вимикається окремо)
+  // Dwarf planets and known minor bodies (decorative layer, toggled separately)
   const minorBodyData = {
     Ceres:    { a: 4.14e11, e: 0.076, i: 10.6, Om: 80.3,  w: 73.6,  T: 1682,  L0: 95.99,  color: 0xa89a8a, size: 0.55, radiusKm: 469.7,
       facts: { mass: '9.38 × 10²⁰ kg', distance: '2.77 AU', day: '9.1 h', year: '4.6 Earth years', moons: '0', temp: '−105 °C avg', blurb: 'Largest object in the asteroid belt, reclassified as a dwarf planet in 2006. Has water ice beneath its crust.' } },
@@ -75,7 +58,7 @@
       facts: { mass: '3.1 × 10²¹ kg', distance: '45.8 AU avg', day: '22.5 h', year: '306 Earth years', moons: '1', temp: '−239 °C avg', blurb: 'Named after a Rapa Nui creation deity. One of the largest known Kuiper Belt objects after Pluto and Eris.' } },
   };
 
-  // Комета Галлея — сильно витягнута ретроградна орбіта (реальні елементи)
+  // Halley's Comet — highly elongated retrograde orbit (real elements)
   const cometData = {
     a: 2.667e12, e: 0.9671, i: 162.26, Om: 58.42, w: 111.33, T: 27509, L0: 190,
     color: 0xdff2ff, size: 0.5, radiusKm: 5.5,
@@ -108,7 +91,7 @@
     return [x3, y3, z3];
   }
 
-  // Позиція планети (метри) за кількість днів від базової дати 2000-01-01
+  // Planet position (meters) for number of days since base date 2000-01-01
   function keplerPosition(data, daysSinceBase) {
     const { a, e, T } = data;
     const i = data.i * Math.PI / 180, Om = data.Om * Math.PI / 180, w = data.w * Math.PI / 180;
@@ -117,14 +100,14 @@
     let M = M0 + 2 * Math.PI * dayMod / T;
     let E = M;
     for (let k = 0; k < 12; k++) E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-    // Положення відносно фокуса (Сонця) — саме тут була помилка: E відлічується
-    // від ЦЕНТРА еліпса, тож просте r·cosE/r·sinE давало точку не на орбіті.
+    // Position relative to focus (Sun) — the error was here: E is measured
+    // from the CENTER of the ellipse, so simple r·cosE/r·sinE gave a point not on the orbit.
     const xOrb = a * (Math.cos(E) - e);
     const yOrb = a * Math.sqrt(1 - e * e) * Math.sin(E);
     return rotatePoint(xOrb, yOrb, 0, Om, i, w);
   }
 
-  // Перетворення орбітальних координат (м) у координати сцени (Y — "вгору")
+  // Transform orbital coordinates (m) to scene coordinates (Y — "up")
   function toScene(pos) {
     return [
       (pos[0] / AU) * SCENE_SCALE,
@@ -134,9 +117,9 @@
   }
 
   // ======================================================================
-  // 1b. Процедурні текстури планет (без зовнішніх зображень — все генерується
-  //     на <canvas> у момент запуску: кратери, континенти/хмари, смуги
-  //     газових гігантів, крижані шапки, гранули Сонця).
+  // 1b. Procedural planet textures (no external images — everything is generated
+  //     on <canvas> at startup: craters, continents/clouds, gas giant stripes,
+  //     ice caps, solar granulation).
   // ======================================================================
   function hash2(x, y, seed) {
     const s = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453;
@@ -182,7 +165,7 @@
     return tex;
   }
 
-  // Кратерована кам'яниста поверхня (Меркурій, Плутон)
+  // Cratered rocky surface (Mercury, Pluto)
   function paintRocky(ctx, baseHex, darkHex, lightHex, craterCount, seed) {
     const base = hexToRgb(baseHex), dark = hexToRgb(darkHex), light = hexToRgb(lightHex);
     const img = ctx.createImageData(TEX_W, TEX_H);
@@ -210,8 +193,8 @@
     }
   }
 
-  // Багатоколірна плямистість без кратерів (сірчані вулканічні плями Іо,
-  // блідий лід карликових планет) — стопи кольорів за значенням шуму 0..1
+  // Multi-colored mottling without craters (sulfurous volcanic spots on Io,
+  // pale ice of dwarf planets) — color stops by noise value 0..1
   function paintMottled(ctx, stops, seed, scale, octaves) {
     const rgbStops = stops.map(function (s) { return { t: s.t, rgb: hexToRgb(s.color) }; });
     const img = ctx.createImageData(TEX_W, TEX_H);
@@ -233,7 +216,7 @@
     ctx.putImageData(img, 0, 0);
   }
 
-  // Тонкі тріщини поверх крижаної поверхні (Європа)
+  // Fine cracks on icy surface (Europa)
   function paintCracks(ctx, count, seed) {
     let rngState = seed * 9301 + 49297;
     function rnd() { rngState = (rngState * 9301 + 49297) % 233280; return rngState / 233280; }
@@ -255,7 +238,7 @@
     }
   }
 
-  // Горизонтально-смугасті газові гіганти (Юпітер, Сатурн, Уран, Нептун)
+  // Horizontally-banded gas giants (Jupiter, Saturn, Uranus, Neptune)
   function paintBands(ctx, bandColorsHex, seed, waviness, spot) {
     const bands = bandColorsHex.map(hexToRgb);
     const img = ctx.createImageData(TEX_W, TEX_H);
@@ -286,7 +269,7 @@
     }
   }
 
-  // Земля: океани, континенти, хмари
+  // Earth: oceans, continents, clouds
   function paintEarth(ctx, seed) {
     const oceanDeep = [10, 30, 68], ocean = [24, 60, 112];
     const land = [56, 90, 46], landHigh = [124, 110, 76];
@@ -316,7 +299,7 @@
     ctx.putImageData(img, 0, 0);
   }
 
-  // Марс: іржаво-руді регіони + полярні шапки
+  // Mars: rust-red regions + polar caps
   function paintMars(ctx, seed) {
     const baseLight = [193, 96, 60], baseDark = [120, 55, 34], ice = [238, 232, 222];
     const img = ctx.createImageData(TEX_W, TEX_H);
@@ -333,12 +316,12 @@
     ctx.putImageData(img, 0, 0);
   }
 
-  // Венера: щільні завихрені хмари
+  // Venus: dense swirling clouds
   function paintVenus(ctx, seed) {
     paintBands(ctx, [0xe8d9a8, 0xf2e6bd, 0xdfc98f, 0xf0e2ae, 0xe3d29c], seed, 0.55, null);
   }
 
-  // Сонце: гранульована поверхня
+  // Sun: granulated surface
   function paintSun(ctx, seed) {
     const c1 = [255, 236, 160], c2 = [255, 190, 90], c3 = [255, 250, 220];
     const img = ctx.createImageData(TEX_W, TEX_H);
@@ -355,9 +338,9 @@
     ctx.putImageData(img, 0, 0);
   }
 
-  // Псевдо-тінь від кільця на диску Сатурна (статичний художній ефект,
-  // не прив'язаний динамічно до напрямку на Сонце — справжній shadow-mapping
-  // тут надлишковий для цього масштабу сцени).
+  // Pseudo-shadow from ring on Saturn's disk (static artistic effect,
+  // not dynamically tied to Sun direction — true shadow-mapping
+  // would be overkill for this scale).
   function paintRingShadowBand(ctx) {
     const bandY = TEX_H * 0.35, bandH = TEX_H * 0.09;
     const grad = ctx.createLinearGradient(0, bandY - bandH, 0, bandY + bandH);
@@ -384,7 +367,7 @@
       case 'Neptune': paintBands(ctx, [0x3c5fc2, 0x4d72d6, 0x33509e, 0x5a7fd9], seed, 0.06, 'rgba(30,45,90,0.55)'); break;
       case 'Pluto': paintRocky(ctx, 0xcbb69e, 0x8f7a66, 0xe8dcc9, 18, seed); break;
 
-      // ---- Супутники ----
+      // ---- Moons ----
       case 'Moon': paintRocky(ctx, 0xb8b8b6, 0x6d6d6b, 0xdcdcda, 65, seed); break;
       case 'Io': paintMottled(ctx, [
         { t: 0.0, color: 0x5a2a1a }, { t: 0.3, color: 0xb35a1e },
@@ -398,12 +381,12 @@
       case 'Callisto': paintRocky(ctx, 0x6b6259, 0x3c3733, 0x8c8175, 140, seed); break;
       case 'Titan': paintBands(ctx, [0xd68f4a, 0xe8b877, 0xd9a562, 0xf0c98d, 0xdba86a], seed, 0.16, null); break;
 
-      // ---- Карликові планети ----
+      // ---- Dwarf planets ----
       case 'Ceres': paintRocky(ctx, 0x9c9186, 0x5c554c, 0xc2b9ac, 55, seed); break;
       case 'Eris': paintRocky(ctx, 0xd8d2c8, 0x9d968c, 0xf3efe9, 20, seed); break;
       case 'Makemake': paintRocky(ctx, 0xb08765, 0x6c4c36, 0xdab494, 32, seed); break;
 
-      // ---- Комета ----
+      // ---- Comet ----
       case "Halley's Comet": paintRocky(ctx, 0x4a4844, 0x201f1d, 0x6d6a64, 28, seed); break;
 
       default: paintRocky(ctx, 0xaaaaaa, 0x777777, 0xcccccc, 40, seed);
@@ -412,24 +395,41 @@
   }
 
   // ======================================================================
-  // 2. Стартовий екран — вибір дат
+  // 2. Start screen — date selection
   // ======================================================================
   const startOverlay = document.getElementById('start-overlay');
   const dateStartInput = document.getElementById('date-start');
   const dateEndInput = document.getElementById('date-end');
   const startError = document.getElementById('start-error');
 
-  // Якщо повернулись сюди через "← Change dates", підставляємо дати,
-  // з якими симуляція запускалась востаннє, замість дефолтних.
+  // Transparent div over each date input — click opens picker
+  // without segment selection (day/month/year)
+  [dateStartInput, dateEndInput].forEach(function(inp) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:absolute;inset:0;cursor:pointer;z-index:2;';
+    wrap.appendChild(overlay);
+
+    overlay.addEventListener('click', function() {
+      try { inp.showPicker(); } catch(e) { inp.focus(); }
+    });
+  });
+
+  // If we returned here via "← Change dates", use the dates
+  // with which the simulation was last launched, instead of defaults.
   try {
     const savedStart = sessionStorage.getItem('solarSim_start');
     const savedEnd = sessionStorage.getItem('solarSim_end');
     if (savedStart) dateStartInput.value = savedStart;
     if (savedEnd) dateEndInput.value = savedEnd;
-  } catch (e) { /* sessionStorage недоступний — просто лишаємо дефолтні дати */ }
+  } catch (e) { /* sessionStorage unavailable — just use default dates */ }
 
-  // Посилання зі "Copy link to this view" — параметри в URL мають пріоритет
-  // над sessionStorage і одразу запускають симуляцію без ручного кліку.
+  // Link from "Copy link to this view" — URL parameters have priority
+  // over sessionStorage and immediately launch simulation without manual click.
   let autoLaunchFromUrl = false;
   try {
     const params = new URLSearchParams(location.search);
@@ -439,7 +439,7 @@
       dateEndInput.value = urlEnd;
       autoLaunchFromUrl = true;
     }
-  } catch (e) { /* URL API недоступний — ігноруємо */ }
+  } catch (e) { /* URL API unavailable — ignore */ }
 
   document.querySelectorAll('.preset-chip').forEach(function (chip) {
     chip.addEventListener('click', function () {
@@ -486,7 +486,7 @@
   }
 
   // ======================================================================
-  // 3. Ініціалізація сцени (запускається після вибору дат)
+  // 3. Scene initialization (runs after date selection)
   // ======================================================================
   function launchSimulation(startDate, endDate) {
     const totalDays = Math.round((endDate - startDate) / 86400000);
@@ -497,7 +497,7 @@
       document.getElementById(id).style.opacity = '1';
     });
 
-    // ---- Мобільна логіка (drawers, backdrop, touch hints) ----
+    // ---- Mobile logic (drawers, backdrop, touch hints) ----
     (function initMobile() {
       var mq         = window.matchMedia('(max-width: 640px)');
       var backdrop   = document.getElementById('mobile-backdrop');
@@ -664,7 +664,7 @@
       });
     }());
 
-    // ---- Three.js базова сцена ----
+    // ---- Three.js base scene ----
     const canvas = document.getElementById('scene-canvas');
     const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -685,12 +685,12 @@
     controls.maxDistance = maxOrbitUnits * 6;
     controls.target.set(0, 0, 0);
 
-    // ---- Освітлення ----
+    // ---- Lighting ----
     scene.add(new THREE.AmbientLight(0x404050, 1.1));
     const sunLight = new THREE.PointLight(0xfff2cc, 2.4, maxOrbitUnits * 8, 1.4);
     scene.add(sunLight);
 
-    // ---- Зоряне небо ----
+    // ---- Starfield ----
     const starGroup = new THREE.Group();
     function buildStars(starCount) {
       while (starGroup.children.length) {
@@ -718,7 +718,7 @@
     buildStars(6000);
     scene.add(starGroup);
 
-    // ---- Сонце (сфера + сяйво зі спрайтів) ----
+    // ---- Sun (sphere + glow from sprites) ----
     const sunGroup = new THREE.Group();
     const sunRadius = 3.4;
     const sunMesh = new THREE.Mesh(
@@ -746,7 +746,7 @@
     })();
     scene.add(sunGroup);
 
-    // ---- Пояс астероїдів ----
+    // ---- Asteroid belt ----
     const beltGroup = new THREE.Group();
     function buildBelt(beltCount) {
       while (beltGroup.children.length) {
@@ -774,7 +774,7 @@
     buildBelt(2200);
     scene.add(beltGroup);
 
-    // Перебудова важких шарів під "низьку деталізацію" (для слабких/мобільних пристроїв)
+    // Rebuild heavy layers for "low detail mode" (for weak/mobile devices)
     function rebuildDetailLayers() {
       buildStars(state.lowDetail ? 1200 : 6000);
       buildBelt(state.lowDetail ? 500 : 2200);
@@ -782,7 +782,7 @@
       beltGroup.visible = state.showBelt;
     }
 
-    // ---- Статичні орбіти (пунктирні еліпси) ----
+    // ---- Static orbits (dashed ellipses) ----
     const orbitsGroup = new THREE.Group();
     Object.keys(planetData).forEach(function (name) {
       const d = planetData[name];
@@ -806,7 +806,7 @@
     });
     scene.add(orbitsGroup);
 
-    // ---- Текстовий спрайт-лейбл ----
+    // ---- Text sprite label ----
     function makeLabel(text, color) {
       const cnv = document.createElement('canvas');
       cnv.width = 256; cnv.height = 64;
@@ -822,7 +822,7 @@
       return sprite;
     }
 
-    // ---- Планети, шлейфи, лейбли ----
+    // ---- Planets, trails, labels ----
     const planetMeshes = {};
     const planetSpinMeshes = {};
     const atmoMeshes = {};
@@ -834,8 +834,8 @@
     Object.keys(planetData).forEach(function (name) {
       const d = planetData[name];
 
-      // Групи: orbitGroup (позиція на орбіті) → tiltGroup (фіксований нахил
-      // осі) → сфера, що обертається навколо вже нахиленої локальної осі.
+      // Groups: orbitGroup (position on orbit) → tiltGroup (fixed axial
+      // tilt) → sphere rotating around already tilted local axis.
       const orbitGroup = new THREE.Group();
       const tiltGroup = new THREE.Group();
       tiltGroup.rotation.z = THREE.MathUtils.degToRad(d.axialTilt || 0);
@@ -854,8 +854,8 @@
       );
       tiltGroup.add(sphereMesh);
 
-      planetMeshes[name] = orbitGroup;      // позиція (орбіта) — публічний інтерфейс лишається той самий
-      planetSpinMeshes[name] = sphereMesh;  // власне обертання
+      planetMeshes[name] = orbitGroup;      // position (orbit) — public interface stays the same
+      planetSpinMeshes[name] = sphereMesh;  // own rotation
 
       if (d.ring) {
         const ring = new THREE.Mesh(
@@ -866,12 +866,12 @@
         sphereMesh.add(ring);
       }
 
-      // Атмосферне світіння — прозора оболонка трохи більша за саму планету,
-      // рендериться зсередини (BackSide) з адитивним блендом. Земля й Венера —
-      // фізично обґрунтовано (густа атмосфера, реальне розсіювання світла на
-      // краю диска). Марс отримує набагато слабше пилово-помаранчеве світіння —
-      // це вже художня вольність (атмосфера Марса дуже розріджена, ефект
-      // у реальності ледь помітний, тут трохи підсилений для виразності).
+      // Atmospheric glow — transparent shell slightly larger than the planet,
+      // rendered from inside (BackSide) with additive blending. Earth and Venus —
+      // physically justified (thick atmosphere, real light scattering at
+      // disk edge). Mars gets much fainter dust-orange glow —
+      // that's already artistic license (Mars atmosphere very thin, effect
+      // barely noticeable in reality, here slightly enhanced for clarity).
       if (name === 'Earth' || name === 'Venus' || name === 'Mars') {
         const atmoColor = name === 'Earth' ? 0x6fb7ff : (name === 'Venus' ? 0xf0dfa0 : 0xd98a4a);
         const atmoOpacity = name === 'Earth' ? 0.22 : (name === 'Venus' ? 0.16 : 0.07);
@@ -901,7 +901,7 @@
       trailBuffers[name] = []; // { day, x, y, z }
     });
 
-    // ---- Супутники ----
+    // ---- Moons ----
     const moonMeshes = {};
     const moonLabels = {};
     Object.keys(moonData).forEach(function (name) {
@@ -921,7 +921,7 @@
       moonLabels[name] = label;
     });
 
-    // ---- Карликові планети (декоративний шар, вимкнено за замовчуванням) ----
+    // ---- Dwarf planets (decorative layer, disabled by default) ----
     const minorBodyMeshes = {};
     const minorBodyLabels = {};
     const minorBodyGroup = new THREE.Group();
@@ -958,7 +958,7 @@
     });
     scene.add(minorBodyGroup);
 
-    // ---- Комета Галлея (реальні орбітальні елементи, з хвостом) ----
+    // ---- Halley's Comet (real orbital elements, with tail) ----
     const cometGroup = new THREE.Group();
     cometGroup.visible = false;
     const cometMesh = new THREE.Mesh(
@@ -981,7 +981,7 @@
       new THREE.PlaneGeometry(1.4, 1, 1, 1),
       new THREE.MeshBasicMaterial({ map: cometTailTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
     );
-    cometTail.geometry.translate(0, 0.5, 0); // якір хвоста у голови комети
+    cometTail.geometry.translate(0, 0.5, 0); // anchor tail at comet head
     cometGroup.add(cometTail);
     const cometOrbitPts = [];
     const cometOrbitSegments = 600;
@@ -1002,13 +1002,13 @@
     cometGroup.add(cometLabel);
     scene.add(cometGroup);
 
-    // ---- Реальні навколоземні астероїди (NASA NeoWs, живі дані) ----
-    // Отримуємо список астероїдів, що проходять близько до Землі впродовж
-    // ЦЬОГО реального тижня (не симульованого — реального, за годинником
-    // браузера). Точні орбіти цих тіл NeoWs не віддає без окремого запиту
-    // на кожне, тож позиція навколо Землі — ілюстративна (випадковий,
-    // але фіксований напрямок); дистанція, швидкість, розмір і дата
-    // зближення — справжні.
+    // ---- Real near-Earth asteroids (NASA NeoWs, live data) ----
+    // We get a list of asteroids passing close to Earth during
+    // THIS real week (not simulated — real, by browser clock). Precise orbits
+    // of these bodies NeoWs doesn't provide without separate queries
+    // for each one, so position around Earth is illustrative (random,
+    // but fixed direction); distance, speed, size, and approach
+    // date — real.
     const realAsteroidGroup = new THREE.Group();
     realAsteroidGroup.visible = false;
     scene.add(realAsteroidGroup);
@@ -1090,12 +1090,12 @@
     }
     fetchRealAsteroids();
 
-    // ---- Траєкторії місій (ілюстративні, НЕ фізично змодельовані —
-    //      справжні гравітаційні маневри й точна ефемерида виходять за межі
-    //      цього симулятора). Апарат "не існує" до дати запуску, потім рухається
-    //      між реальними історичними подіями (проліт Юпітера, Сатурна тощо),
-    //      а після останньої відомої точки летить далі в тому ж напрямку —
-    //      скільки завгодно років вперед. ----
+    // ---- Mission trajectories (illustrative, NOT physically modeled —
+    //      real gravitational maneuvers and precise ephemerides are beyond
+    //      this simulator). Craft "doesn't exist" before launch date, then moves
+    //      between real historical events (Jupiter flyby, Saturn, etc.),
+    //      and after the last known point continues in same direction —
+    //      any number of years ahead. ----
     const missionGroup = new THREE.Group();
     missionGroup.visible = false;
     const missionMeshes = {};
@@ -1184,9 +1184,9 @@
     });
     scene.add(missionGroup);
 
-    // Оновлює позицію апарата за поточну симульовану дату: до запуску — прихований,
-    // між відомими точками — рівномірний рух, після останньої — летить далі
-    // в тому самому напрямку й з тією самою швидкістю.
+    // Updates craft position for current simulated date: before launch — hidden,
+    // between known points — uniform motion, after last — continues in
+    // same direction with same speed.
     function updateMissionPosition(name, currentAbsDay) {
       const mp = missionPaths[name];
       const wp = mp.wp;
@@ -1234,8 +1234,8 @@
     }
 
     // ======================================================================
-    // 4. Реальночасова симуляція (без "aliasing" навіть на тисячоліттях —
-    //    шлейф добудовується підкроками пропорційно до періоду планети)
+    // 4. Real-time simulation (no aliasing even over millennia —
+    //    trail builds with sub-steps proportional to planet period)
     // ======================================================================
     const state = {
       currentDay: 0,
@@ -1253,15 +1253,15 @@
       showRealAsteroids: false,
       trueScale: false,
       lowDetail: false,
-      followName: null,       // назва планети, за якою стежить камера (null = вільна камера)
-      followAnchor: null,     // THREE.Vector3 — позиція об'єкта стеження на попередньому кадрі
-      followOffsetDir: null,  // напрямок камери відносно планети в момент вибору
-      followDist: 0,          // бажана дистанція камери від планети
-      followFlyStart: null,   // позиція камери на старті "підльоту"
+      followName: null,       // name of planet camera is following (null = free camera)
+      followAnchor: null,     // THREE.Vector3 — position of tracked object on previous frame
+      followOffsetDir: null,  // camera direction relative to planet at selection moment
+      followDist: 0,          // desired camera distance from planet
+      followFlyStart: null,   // camera position at start of "fly-to"
       followFlyStartTarget: null,
       followFlyElapsed: 0,
-      followFlyDuration: 0.9, // сек
-      prevCameraPos: null,    // вид камери до останнього переходу на тіло
+      followFlyDuration: 0.9, // sec
+      prevCameraPos: null,    // camera view before last transition to body
       prevCameraTarget: null,
       returnFlying: false,
       returnFlyStart: null,
@@ -1271,12 +1271,12 @@
       returnFlyElapsed: 0,
     };
 
-    const baseDaysPerSecond = totalDays / 120; // повний діапазон ≈ за 2 хв на швидкості ×1
+    const baseDaysPerSecond = totalDays / 120; // full range ≈ in 2 min at speed ×1
 
     function pushTrailPoint(name, pos, day) {
       const buf = trailBuffers[name];
       buf.push({ day: day, x: pos[0], y: pos[1], z: pos[2] });
-      const windowDays = planetData[name].T * 1.0; // один оберт назад
+      const windowDays = planetData[name].T * 1.0; // one orbit back
       while (buf.length > 2 && state.currentDay - buf[0].day > windowDays) buf.shift();
       if (buf.length > TRAIL_MAX_POINTS) buf.splice(0, buf.length - TRAIL_MAX_POINTS);
     }
@@ -1320,8 +1320,8 @@
         }
 
         planetMeshes[name].position.set(lastPos[0], lastPos[1], lastPos[2]);
-        // Легке обертання навколо власної осі — суто візуальне (не прив'язане
-        // до реальних періодів доби), щоб текстура поверхні була помітна в русі.
+        // Light rotation around own axis — purely visual (not tied
+        // to real day periods) so surface texture is visible in motion.
         planetSpinMeshes[name].rotation.y += actualDelta * (0.06 + (1 / d.size) * 0.02);
         planetLabels[name].position.set(lastPos[0] + d.size * 1.6, lastPos[1] + d.size * 1.6, lastPos[2]);
         planetLabels[name].visible = state.showLabels;
@@ -1335,9 +1335,9 @@
           const m = moonData[name];
           const parentPos = planetMeshes[m.parent].position;
           const phase = 2 * Math.PI * ((state.currentDay % m.T) / m.T);
-          // Орбіта — множник від художнього розміру батьківської планети
-          // (не реальна відстань в а.о.), інакше супутник опиняється
-          // всередині "роздутої" для наочності кулі планети й стає невидимим.
+          // Orbit — multiplier from artistic size of parent planet
+          // (not real distance in AU), otherwise moon ends up
+          // inside the "inflated" sphere and becomes invisible.
           const orbitR = planetData[m.parent].size * m.orbitMult;
           const mx = parentPos.x + orbitR * Math.cos(phase);
           const my = parentPos.y;
@@ -1362,7 +1362,7 @@
         const sp = toScene(posM);
         cometMesh.position.set(sp[0], sp[1], sp[2]);
         cometLabel.position.set(sp[0] + 2.2, sp[1] + 2.2, sp[2]);
-        // Хвіст завжди спрямований від Сонця, довший і яскравіший поблизу перигелію
+        // Tail always points away from Sun, longer and brighter near perihelion
         const dist = Math.sqrt(sp[0] * sp[0] + sp[1] * sp[1] + sp[2] * sp[2]);
         const dirAway = dist > 0.001 ? [sp[0] / dist, sp[1] / dist, sp[2] / dist] : [1, 0, 0];
         const closeness = Math.max(0, 1 - dist / (cometData.a / AU * SCENE_SCALE * 0.6));
@@ -1406,9 +1406,9 @@
         Math.round(state.currentDay).toLocaleString('en-US') + ' / ' + totalDays.toLocaleString('en-US');
     }
 
-    // ---- Стеження камери за планетою ----
-    // Уніфікований доступ до позиції/розміру будь-якого об'єкта, за яким
-    // можна стежити або про який можна показати панель фактів.
+    // ---- Camera tracking of planet ----
+    // Unified access to position/size of any object that can be
+    // tracked or for which to show fact panel.
     function getFollowablePosition(name) {
       if (name === 'Sun') return new THREE.Vector3(0, 0, 0);
       if (planetMeshes[name]) return planetMeshes[name].position;
@@ -1433,7 +1433,7 @@
     function selectFollow(name) {
       const legendItems = document.querySelectorAll('#legend .item');
       if (state.followName === name) {
-        // повторний клік — знімаємо стеження, лишаємо камеру де є
+        // second click — stop tracking, leave camera where it is
         state.followName = null;
         legendItems.forEach(function (el) { el.classList.remove('active'); });
         return;
@@ -1441,8 +1441,8 @@
       const target = getFollowablePosition(name);
       if (!target) return;
 
-      // Запам'ятовуємо, де камера була ДО цього переходу — щоб потім можна
-      // було повернутись назад однією кнопкою.
+      // Remember where camera was BEFORE this transition — so we can
+      // go back with one button later.
       state.prevCameraPos = camera.position.clone();
       state.prevCameraTarget = controls.target.clone();
 
@@ -1451,8 +1451,8 @@
         el.classList.toggle('active', el.dataset.body === name);
       });
 
-      // Якщо панель фактів зараз відкрита — оновлюємо її на щойно вибране
-      // тіло, інакше вона лишається показувати дані попереднього об'єкта.
+      // If fact panel is open now — update it for just-selected
+      // body, otherwise it stays showing previous object's data.
       if (infoPanel.classList.contains('open')) showInfoPanel(name);
 
       const size = getFollowableSize(name);
@@ -1483,8 +1483,8 @@
         camera.position.lerpVectors(state.followFlyStart, desiredCamPos, ease);
         controls.target.lerpVectors(state.followFlyStartTarget, target, ease);
       } else {
-        // сталий режим: переносимо камеру й ціль на ту саму дельту, що й планета,
-        // тож можна вільно обертати мишкою навколо неї, а вона нікуди не "втече"
+        // steady mode: move camera and target by same delta as planet,
+        // so you can freely rotate mouse around it and it won't "escape"
         const delta = target.clone().sub(state.followAnchor);
         camera.position.add(delta);
         controls.target.add(delta);
@@ -1492,7 +1492,7 @@
       state.followAnchor.copy(target);
     }
 
-    // ---- Повернення до виду, який був до переходу на тіло ----
+    // ---- Return to view that was before transition to body ----
     function returnToPreviousView() {
       if (!state.prevCameraPos) return;
       const legendItems = document.querySelectorAll('#legend .item');
@@ -1519,7 +1519,7 @@
       if (t >= 1) state.returnFlying = false;
     }
 
-    // ---- Легенда ----
+    // ---- Legend ----
     function makeLegendRow(legend, name, colorHex, small) {
       const row = document.createElement('div');
       row.className = 'item' + (small ? ' item-sub' : '');
@@ -1626,13 +1626,13 @@
       window.addEventListener('resize', updateFade);
     }());
 
-    // ---- Панель фактів про небесне тіло ----
+    // ---- Celestial body fact panel ----
     const infoPanel = document.getElementById('info-panel');
     const infoFactLabels = { mass: 'Mass', distance: 'Distance from Sun', day: 'Day length', year: 'Year length', moons: 'Moons', temp: 'Avg. temperature' };
     const missionFactLabels = { launch: 'Launch date', flybys: 'Key flybys', status: 'Current status', speed: 'Speed' };
     let infoPanelBody = null;
 
-    // ---- NASA DONKI: останній сонячний спалах (ліниво, з кешем) ----
+    // ---- NASA DONKI: latest solar flare (lazy, with cache) ----
     let sunFlareCache = null;
     function fetchLatestFlare(callback) {
       if (sunFlareCache !== null) { callback(sunFlareCache); return; }
@@ -1650,7 +1650,7 @@
         .catch(function () { sunFlareCache = false; callback(false); });
     }
 
-    // ---- NASA EPIC: найновіше фото Землі (ліниво, з кешем) ----
+    // ---- NASA EPIC: latest Earth photo (lazy, with cache) ----
     let epicCache = null;
     function fetchLatestEpic(callback) {
       if (epicCache !== null) { callback(epicCache); return; }
@@ -1704,9 +1704,9 @@
         return;
       }
       infoPanelBody = name;
-      // прибираємо динамічний блок фото (EPIC) з попереднього відкриття панелі —
-      // сам info-grid чиститься нижче автоматично, це стосується лише
-      // елементів, доданих ЗА межами info-grid.
+      // remove dynamic photo block (EPIC) from previous panel opening —
+      // info-grid itself gets cleaned below automatically, this only
+      // concerns elements added OUTSIDE info-grid.
       const stalePhoto = document.getElementById('info-photo-wrap');
       if (stalePhoto) stalePhoto.remove();
 
@@ -1729,7 +1729,7 @@
         grid.appendChild(value);
       });
 
-      // ---- Живі дані NASA: спалахи Сонця / фото Землі (довантажуються асинхронно) ----
+      // ---- Live NASA data: solar flares / Earth photo (loaded asynchronously) ----
       if (name === 'Sun') {
         const flareLabel = document.createElement('div');
         flareLabel.className = 'info-label';
@@ -1742,7 +1742,7 @@
         grid.appendChild(flareValue);
         fetchLatestFlare(function (flare) {
           const el = document.getElementById('info-flare-value');
-          if (!el) return; // панель вже закрита або показує інше тіло
+          if (!el) return; // panel already closed or showing different body
           if (!flare) { el.textContent = 'No major flares in the last 30 days'; return; }
           const dateStr = flare.peakTime ? flare.peakTime.slice(0, 10) : '';
           el.textContent = 'Class ' + flare.classType + ' on ' + dateStr;
@@ -1782,9 +1782,9 @@
       infoPanel.classList.remove('open');
     });
 
-    // ---- Клік по об'єкту прямо в 3D-сцені відкриває ту саму панель фактів ----
-    // Розрізняємо клік і перетягування камери мишкою за відстанню, яку курсор
-    // пройшов між натисканням і відпусканням кнопки.
+    // ---- Click on object directly in 3D scene opens same fact panel ----
+    // Distinguish click from camera drag by distance cursor moved
+    // between button press and release.
     const raycaster = new THREE.Raycaster();
     const pointerNDC = new THREE.Vector2();
     let pointerDownXY = null;
@@ -1828,7 +1828,7 @@
       if (!pointerDownXY) return;
       const dx = e.clientX - pointerDownXY.x, dy = e.clientY - pointerDownXY.y;
       pointerDownXY = null;
-      if (Math.sqrt(dx * dx + dy * dy) > 5) return; // це було обертання камери, не клік
+      if (Math.sqrt(dx * dx + dy * dy) > 5) return; // that was camera rotation, not click
 
       const rect = renderer.domElement.getBoundingClientRect();
       pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1840,14 +1840,14 @@
       if (intersects.length > 0) {
         const hit = bodies.find(function (b) { return b.mesh === intersects[0].object; });
         if (hit) {
-          selectFollow(hit.name); // клік по тілу одразу переносить туди камеру
+          selectFollow(hit.name); // click on body immediately moves camera there
           showInfoPanel(hit.name);
         }
       }
     });
 
     // ======================================================================
-    // 5. Керування UI
+    // 5. UI Control
     // ======================================================================
     const btnPlay = document.getElementById('btn-play');
     btnPlay.addEventListener('click', function () {
@@ -1859,7 +1859,7 @@
       try {
         sessionStorage.setItem('solarSim_start', startDate.toISOString().slice(0, 10));
         sessionStorage.setItem('solarSim_end', endDate.toISOString().slice(0, 10));
-      } catch (e) { /* sessionStorage недоступний — просто перезавантажимо з дефолтними датами */ }
+      } catch (e) { /* sessionStorage unavailable — just reload with default dates */ }
       location.reload();
     });
 
@@ -1878,8 +1878,8 @@
     btnView.addEventListener('click', function () {
       state.topView = !state.topView;
       btnView.textContent = state.topView ? 'Side view' : 'Top view';
-      // Рахуємо відносно поточної цілі камери (а не центру світу), щоб
-      // коректно працювало й під час стеження за окремою планетою.
+      // Calculate relative to current camera target (not world center), so
+      // it works correctly when tracking individual planet.
       const dist = camera.position.distanceTo(controls.target);
       const t = controls.target;
       if (state.topView) {
@@ -1902,17 +1902,43 @@
 
     const btnLayers = document.getElementById('btn-layers');
     const layersPanel = document.getElementById('layers-panel');
-    btnLayers.addEventListener('click', function () {
+    btnLayers.addEventListener('click', function (e) {
+      e.stopPropagation();
       layersPanel.classList.toggle('open');
     });
+    layersPanel.addEventListener('click', function (e) { e.stopPropagation(); });
 
-    // ---- Панель інструментів: перехід на дату / збереження кадру / посилання ----
+    // ---- Tools panel: jump to date / save frame / link ----
     const btnTools = document.getElementById('btn-tools');
     const toolsPanel = document.getElementById('tools-panel');
     const toolsMsg = document.getElementById('tools-msg');
-    btnTools.addEventListener('click', function () {
+    btnTools.addEventListener('click', function (e) {
+      e.stopPropagation();
       toolsPanel.classList.toggle('open');
     });
+    toolsPanel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    // Close both panels with click anywhere on screen
+    document.addEventListener('click', function () {
+      layersPanel.classList.remove('open');
+      toolsPanel.classList.remove('open');
+    });
+
+    // Fix date input in tools panel: open picker without segment selection
+    var jumpDateInput = document.getElementById('jump-date');
+    if (jumpDateInput) {
+      var jumpWrap = document.createElement('div');
+      jumpWrap.style.cssText = 'position:relative;flex:1;';
+      jumpDateInput.parentNode.insertBefore(jumpWrap, jumpDateInput);
+      jumpWrap.appendChild(jumpDateInput);
+      var jumpOverlay = document.createElement('div');
+      jumpOverlay.style.cssText = 'position:absolute;inset:0;cursor:pointer;z-index:2;';
+      jumpWrap.appendChild(jumpOverlay);
+      jumpOverlay.addEventListener('click', function (e) {
+        e.stopPropagation();
+        try { jumpDateInput.showPicker(); } catch(err) { jumpDateInput.focus(); }
+      });
+    }
 
     document.getElementById('btn-jump').addEventListener('click', function () {
       const val = document.getElementById('jump-date').value;
@@ -1930,7 +1956,7 @@
 
     document.getElementById('btn-save-image').addEventListener('click', function () {
       try {
-        renderer.render(scene, camera); // гарантуємо свіжий кадр перед збереженням
+        renderer.render(scene, camera); // ensure fresh frame before saving
         const url = renderer.domElement.toDataURL('image/png');
         const a = document.createElement('a');
         a.href = url;
@@ -1973,7 +1999,7 @@
         moonLabels[n].visible = e.target.checked && state.showLabels;
       });
       rebuildLegend();
-      advanceAndRender(0); // одразу порахувати позицію, навіть якщо симуляція на паузі
+      advanceAndRender(0); // calculate position immediately even if simulation is paused
     });
     document.getElementById('chk-stars').addEventListener('change', function (e) {
       state.showStars = e.target.checked;
@@ -1987,24 +2013,24 @@
       Object.keys(realAsteroidLabels).forEach(function (n) {
         realAsteroidLabels[n].visible = e.target.checked && state.showRealAsteroids;
       });
-      advanceAndRender(0); // оновлює також видимість підписів місій
+      advanceAndRender(0); // also updates visibility of mission labels
     });
     document.getElementById('chk-minor').addEventListener('change', function (e) {
       state.showMinor = e.target.checked;
       minorBodyGroup.visible = e.target.checked;
       rebuildLegend();
-      advanceAndRender(0); // одразу порахувати позицію, навіть якщо симуляція на паузі
+      advanceAndRender(0); // calculate position immediately even if simulation is paused
     });
     document.getElementById('chk-comet').addEventListener('change', function (e) {
       state.showComet = e.target.checked;
       cometGroup.visible = e.target.checked;
       rebuildLegend();
-      advanceAndRender(0); // одразу порахувати позицію, навіть якщо симуляція на паузі
+      advanceAndRender(0); // calculate position immediately even if simulation is paused
     });
     document.getElementById('chk-missions').addEventListener('change', function (e) {
       state.showMissions = e.target.checked;
       missionGroup.visible = e.target.checked;
-      advanceAndRender(0); // одразу порахувати позицію, навіть якщо симуляція на паузі
+      advanceAndRender(0); // calculate position immediately even if simulation is paused
       rebuildLegend();
     });
     document.getElementById('chk-neows').addEventListener('change', function (e) {
@@ -2013,7 +2039,7 @@
       Object.keys(realAsteroidLabels).forEach(function (n) {
         realAsteroidLabels[n].visible = e.target.checked && state.showLabels;
       });
-      advanceAndRender(0); // одразу порахувати позицію, навіть якщо симуляція на паузі
+      advanceAndRender(0); // calculate position immediately even if simulation is paused
       rebuildLegend();
     });
     document.getElementById('chk-truescale').addEventListener('change', function (e) {
@@ -2051,10 +2077,10 @@
     });
 
     // ======================================================================
-    // 6. Головний цикл анімації
+    // 6. Main animation loop
     // ======================================================================
     let lastTime = performance.now();
-    advanceAndRender(0); // початковий кадр
+    advanceAndRender(0); // initial frame
 
     function tick(now) {
       requestAnimationFrame(tick);
@@ -2065,9 +2091,9 @@
 
       if (!state.paused && state.currentDay < totalDays) {
         const deltaDays = baseDaysPerSecond * state.speedMultiplier * dtSeconds;
-        // На дуже високій швидкості (перемотка тисячоліть) один крок кадру
-        // може перевищувати цілі орбітальні періоди — ділимо його на дрібні
-        // під-кроки, щоб шлейф лишався гладким за будь-якої швидкості.
+        // At very high speed (fast-forwarding millennia) one frame step
+        // may exceed entire orbital periods — divide it into tiny
+        // sub-steps so trail stays smooth at any speed.
         const maxChunkDays = Math.max(1, planetData.Mercury.T / 8);
         const chunks = Math.min(60, Math.max(1, Math.ceil(deltaDays / maxChunkDays)));
         const chunkSize = deltaDays / chunks;
