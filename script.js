@@ -402,20 +402,50 @@
   const dateEndInput = document.getElementById('date-end');
   const startError = document.getElementById('start-error');
 
-  // Transparent div over each date input — click opens picker
-  // without segment selection (day/month/year)
+  // On non-iOS: overlay div prevents segment selection and opens picker on click.
+  // On iOS: showPicker() is not supported — overlay would block native tap, so skip it.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+  // Full-screen backdrop — shown when any date picker is open.
+  // Clicking it blurs the input and closes the calendar.
+  var dateBackdrop = document.createElement('div');
+  dateBackdrop.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;cursor:default;';
+  document.body.appendChild(dateBackdrop);
+
+  function openDatePicker(inp) {
+    dateBackdrop.style.display = 'block';
+    inp.focus();
+    try { inp.showPicker(); } catch(e) {}
+  }
+
+  dateBackdrop.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    dateBackdrop.style.display = 'none';
+    document.activeElement && document.activeElement.blur();
+  });
+
+  if (!isIOS) {
+    [dateStartInput, dateEndInput].forEach(function(inp) {
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;';
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;inset:0;cursor:pointer;z-index:2;';
+      wrap.appendChild(overlay);
+
+      overlay.addEventListener('click', function() { openDatePicker(inp); });
+    });
+  }
+
+  // Hide backdrop when picker closes (input loses focus)
   [dateStartInput, dateEndInput].forEach(function(inp) {
-    var wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;';
-    inp.parentNode.insertBefore(wrap, inp);
-    wrap.appendChild(inp);
-
-    var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:absolute;inset:0;cursor:pointer;z-index:2;';
-    wrap.appendChild(overlay);
-
-    overlay.addEventListener('click', function() {
-      try { inp.showPicker(); } catch(e) { inp.focus(); }
+    inp.addEventListener('blur', function() {
+      setTimeout(function() { dateBackdrop.style.display = 'none'; }, 150);
+    });
+    inp.addEventListener('focus', function() {
+      dateBackdrop.style.display = 'block';
     });
   });
 
@@ -1918,15 +1948,25 @@
     });
     toolsPanel.addEventListener('click', function (e) { e.stopPropagation(); });
 
-    // Close both panels with click anywhere on screen
-    document.addEventListener('click', function () {
+    // Close both panels with click/tap anywhere on screen
+    // iOS Safari doesn't fire 'click' on non-interactive elements — use touchend too
+    function closePanels() {
       layersPanel.classList.remove('open');
       toolsPanel.classList.remove('open');
-    });
+    }
+    document.addEventListener('click', closePanels);
+    document.addEventListener('touchend', function(e) {
+      // only close if the touch ended outside both panels and their buttons
+      var target = e.target;
+      if (!layersPanel.contains(target) && target !== btnLayers &&
+          !toolsPanel.contains(target) && target !== btnTools) {
+        closePanels();
+      }
+    }, { passive: true });
 
-    // Fix date input in tools panel: open picker without segment selection
+    // Fix date input in tools panel: open picker without segment selection (desktop only)
     var jumpDateInput = document.getElementById('jump-date');
-    if (jumpDateInput) {
+    if (jumpDateInput && !isIOS) {
       var jumpWrap = document.createElement('div');
       jumpWrap.style.cssText = 'position:relative;flex:1;';
       jumpDateInput.parentNode.insertBefore(jumpWrap, jumpDateInput);
