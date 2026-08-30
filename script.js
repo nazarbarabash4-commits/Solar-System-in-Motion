@@ -1989,9 +1989,12 @@
         toolsMsg.textContent = 'Outside the current range (' + startDate.toISOString().slice(0, 10) + ' → ' + endDate.toISOString().slice(0, 10) + ').';
         return;
       }
+      // Pause and freeze planets at the selected date
+      state.paused = true;
+      btnPlay.textContent = 'Play';
       state.currentDay = days;
       advanceAndRender(0);
-      toolsMsg.textContent = 'Jumped to ' + val + '.';
+      toolsMsg.textContent = 'Paused at ' + val + '. Press Reset to resume from the start.';
     });
 
     document.getElementById('btn-save-image').addEventListener('click', function () {
